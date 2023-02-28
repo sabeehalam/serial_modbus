@@ -51,21 +51,36 @@ input_registers = {
     0x0003: False,  # Read-Write Boolean
 }
 
-# Initialize UART
-uart = UART(1, baudrate=UART_BAUD_RATE)
-uart.init(baudrate=UART_BAUD_RATE, bits=UART_DATA_BITS,
-            stop=UART_STOP_BITS, parity=UART_PARITY)
+def calculate_crc(data):
+    """
+    Calculates the CRC for the given data in Modbus format
+    """
+    crc = 0xFFFF
+    for i in range(len(data)):
+        crc ^= data[i]
+        for j in range(8):
+            if crc & 0x0001:
+                crc >>= 1
+                crc ^= 0xA001
+            else:
+                crc >>= 1
+    # Modbus uses little-endian byte order for CRC, so swap the bytes
+    return ((crc & 0xFF) << 8) | (crc >> 8)
+
+
 
 # Function to handle Modbus requests
 def handle_request(data):
 
     # Extract function code and register/coil address
-    slave_address, function_code, start_register, register_count = ustruct.unpack(">BBBB", data)
+    slave_address, function_code, start_register, register_count, CRC_high, CRC_low = ustruct.unpack(">BBBBBB", data)
     
     print("Slave address: ", slave_address)
     print("function_code: ", function_code)
     print("start_register: ", start_register)
     print("register_count: ", register_count)
+    print("CRC high: ", CRC_high)
+    print("CRC low: ", CRC_low)
     
     # Check slave address
     if slave_address != SLAVE_ADDRESS:
@@ -73,29 +88,27 @@ def handle_request(data):
     
     # Handle read coil request
     if function_code == READ_COILS:
-        # Extract coils
-        response_data = ustruct.pack(">BB", start_register, function_code)
+        response = ustruct.pack(">BB", slave_address, function_code)
         for i in range(register_count):
-            response_data[i // 8] |= (coils[start_register + i] << (i % 8))
-        return response_data
+            response += ustruct.pack(">H", modbus_registers[start_register + i])
+        # Send Modbus RTU response
+        return response
 
     # Handle read holding register request
     elif function_code == READ_HOLDING_REGISTERS:
-        # Extract registers
-        response_data = ustruct.pack(">BB", start_register, function_code)
+        response = ustruct.pack(">BB", slave_address, function_code)
         for i in range(register_count):
-            value = holding_registers[2 * (start_register + i):2 * (start_register + i + 1)]
-            response_data[2 * i:2 * (i + 1)] = value
-        return response_data
+            response += ustruct.pack(">H", holding_registers[start_register + i])
+        # Send Modbus RTU response
+        return response
     
         # Handle read holding register request
     elif function_code == READ_INPUT_REGISTERS:
-        # Extract registers
-        response_data = ustruct.pack(">BB", start_register, function_code)
+        response = ustruct.pack(">BB", slave_address, function_code)
         for i in range(register_count):
-            value = input_registers[2 * (start_register + i):2 * (start_register + i + 1)]
-            response_data[2 * i:2 * (i + 1)] = value
-        return response_data
+            response += ustruct.pack(">H", input_registers[start_register + i])
+        # Send Modbus RTU response
+        return response
 
     # Handle write single coil request
     elif function_code == WRITE_SINGLE_COIL:
@@ -133,6 +146,10 @@ def handle_request(data):
     else:
         return None
 try:
+    # Initialize UART
+    uart = UART(1, baudrate=UART_BAUD_RATE)
+    uart.init(baudrate=UART_BAUD_RATE, bits=UART_DATA_BITS,
+            stop=UART_STOP_BITS, parity=UART_PARITY)
     while True:
         # Wait for Modbus request
         response_data = 0
@@ -142,9 +159,10 @@ try:
             response_data = handle_request(data)
         if response_data is not None:
             # Send response
-            response = bytearray(SLAVE_ADDRESS + response_data)
+            response = bytearray(response_data)
             uart.write(response)
             time.sleep(1)
 except KeyboardInterrupt as e:
     print("No more modbus")
+
 
