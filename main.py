@@ -1,5 +1,7 @@
 import ustruct
+import binascii
 from machine import UART, Pin
+import const
 import time
 
 # Define Modbus function codes
@@ -31,21 +33,21 @@ coils = {
 }
 
 registers = {
-    0x0001: 123,  # Read-Only Integer
-    0x0002: 456,  # Read-Write Integer
-    0x0003: False,  # Read-Write Boolean
+    0x01: 123,  # Read-Only Integer
+    0x02: 456,  # Read-Write Integer
+    0x03: False,  # Read-Write Boolean
 }
 
 holding_registers = {
-    0x0001: 123,  # Read-Only Integer
-    0x0002: 456,  # Read-Write Integer
-    0x0003: False,  # Read-Write Boolean
+    0x01: 123,  # Read-Only Integer
+    0x02: 456,  # Read-Write Integer
+    0x03: False,  # Read-Write Boolean
 }
 
 input_registers = {
-    0x0001: 123,  # Read-Only Integer
-    0x0002: 456,  # Read-Write Integer
-    0x0003: False,  # Read-Write Boolean
+    0x01: 123,  # Read-Only Integer
+    0x02: 456,  # Read-Write Integer
+    0x03: False,  # Read-Write Boolean
 }
 
 PRESET = 0xFFFF
@@ -74,15 +76,21 @@ def crc16(str):
 def handle_request(data):
     
     # Extract function code and register/coil address
-    slave_address, function_code, start_register, register_count, recv_crc = ustruct.unpack(">BBBBB", data)
-    print(data[0:4])
-#     print("Slave address: ", slave_address)
-#     print("function_code: ", function_code)
-#     print("start_register: ", start_register)
-#     print("register_count: ", register_count)
-    print("crc: ", recv_crc)
+    slave_address, function_code, start_register, register_count, recv_crc_1, recv_crc_2= ustruct.unpack(">BBBBBB", data)
+    print("Slave address: ", slave_address)
+    print("function_code: ", function_code)
+    print("start_register: ", start_register)
+    print("register_count: ", register_count)
+
+    recv_crc = bytearray([recv_crc_1, recv_crc_2])
+    print("recv_crc: ", recv_crc)
+    command = bytearray(data[0:4], "utf-16")
+    expect_crc = crc16(command)
+    print("Expected CRC: ", expect_crc)
     
-    expect_crc = crc16(data[0:7])
+    # Check matching CRC
+    if(recv_crc != expect_crc):
+        return None
     
     # Check slave address
     if slave_address != SLAVE_ADDRESS:
@@ -166,3 +174,6 @@ try:
             time.sleep(1)
 except KeyboardInterrupt as e:
     print("No more modbus")
+
+
+
