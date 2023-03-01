@@ -3,24 +3,21 @@ from machine import UART, Pin
 import time
 
 # Define Modbus function codes
-READ_COILS = 0x01
-READ_DISCRETE_INPUTS = 0x02
-READ_HOLDING_REGISTERS = 0x03
-READ_INPUT_REGISTERS = 0x04
-WRITE_SINGLE_COIL = 0x05
-WRITE_SINGLE_REGISTER = 0x06
-# WRITE_MULTIPLE_COILS = 15
-# WRITE_MULTIPLE_REGISTERS = 16
+READ_COILS = const(0x01)
+READ_DISCRETE_INPUTS = const(0x02)
+READ_HOLDING_REGISTERS = const(0x03)
+READ_INPUT_REGISTERS = const(0x04)
+WRITE_SINGLE_COIL = const(0x05)
+WRITE_SINGLE_REGISTER = const(0x06)
 
 # Define slave address
-SLAVE_ADDRESS = 0x01
+SLAVE_ADDRESS =const(0x01)
 
 # Define UART parameters
 UART_BAUD_RATE = 9600
 UART_DATA_BITS = 8
 UART_STOP_BITS = 1
 UART_PARITY = None
-# UART_TIMEOUT = 1000
 
 # Define Modbus registers and coils
 registers = bytearray(10)
@@ -51,36 +48,41 @@ input_registers = {
     0x0003: False,  # Read-Write Boolean
 }
 
-def calculate_crc(data):
-    """
-    Calculates the CRC for the given data in Modbus format
-    """
-    crc = 0xFFFF
-    for i in range(len(data)):
-        crc ^= data[i]
-        for j in range(8):
-            if crc & 0x0001:
-                crc >>= 1
-                crc ^= 0xA001
-            else:
-                crc >>= 1
-    # Modbus uses little-endian byte order for CRC, so swap the bytes
-    return ((crc & 0xFF) << 8) | (crc >> 8)
+PRESET = 0xFFFF
+POLYNOMIAL = 0xA001 # bit reverse of 0x8005
 
+def _initial(c):
+    crc = 0
+    for j in range(8):
+        if (crc ^ c) & 0x1:
+            crc = (crc >> 1) ^ POLYNOMIAL
+        else:
+            crc = crc >> 1
+        c = c >> 1
+    return crc
 
+import array
+_tab = array.array("H", [_initial(i) for i in range(256)])
+
+def crc16(str):
+    crc = PRESET
+    for c in str:
+        crc = (crc >> 8) ^ _tab[(crc ^ c) & 0xff]
+    return ustruct.pack('<H', crc)
 
 # Function to handle Modbus requests
 def handle_request(data):
-
-    # Extract function code and register/coil address
-    slave_address, function_code, start_register, register_count, CRC_high, CRC_low = ustruct.unpack(">BBBBBB", data)
     
-    print("Slave address: ", slave_address)
-    print("function_code: ", function_code)
-    print("start_register: ", start_register)
-    print("register_count: ", register_count)
-    print("CRC high: ", CRC_high)
-    print("CRC low: ", CRC_low)
+    # Extract function code and register/coil address
+    slave_address, function_code, start_register, register_count, recv_crc = ustruct.unpack(">BBBBB", data)
+    print(data[0:4])
+#     print("Slave address: ", slave_address)
+#     print("function_code: ", function_code)
+#     print("start_register: ", start_register)
+#     print("register_count: ", register_count)
+    print("crc: ", recv_crc)
+    
+    expect_crc = crc16(data[0:7])
     
     # Check slave address
     if slave_address != SLAVE_ADDRESS:
@@ -164,5 +166,3 @@ try:
             time.sleep(1)
 except KeyboardInterrupt as e:
     print("No more modbus")
-
-
