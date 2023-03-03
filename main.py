@@ -3,6 +3,7 @@ import binascii
 from machine import UART, Pin
 import array
 import time
+import gc
 
 # Define Modbus function codes
 READ_COILS = const(0x01)
@@ -23,24 +24,34 @@ UART_PARITY = None
 
 # Define Modbus RTU Registers
 coils = {
-    0x0001: 123,  # Read-Only Integer
-    0x0002: 456,  # Read-Write Integer
-    0x0003: False,  # Read-Write Boolean
+    0x00: 321,
+    0x01: 123,  # Read-Only Integer
+    0x02: 456,  # Read-Write Integer
+    0x03: False,  # Read-Write Boolean
 }
 
 registers = {
+    0x00: 321,
     0x01: 123,  # Read-Only Integer
     0x02: 456,  # Read-Write Integer
     0x03: False,  # Read-Write Boolean
 }
 
 holding_registers = {
+    0x00: 321,
     0x01: 123,  # Read-Only Integer
     0x02: 456,  # Read-Write Integer
-    0x03: False,  # Read-Write Boolean
+    0x03: True, # Read-Write Boolean
+    0x04: 123,  # Read-Only Integer
+    0x05: 456,  # Read-Write Integer
+    0x06: 123,  # Read-Only Integer
+    0x07: 456,  # Read-Write Integer
+    0x08: 123,  # Read-Only Integer
+    0x09: 456,  # Read-Write Integer
 }
 
 input_registers = {
+    0x00: 321,
     0x01: 123,  # Read-Only Integer
     0x02: 456,  # Read-Write Integer
     0x03: False,  # Read-Write Boolean
@@ -53,8 +64,7 @@ input_registers = {
 }
 
 def crc16(buf):
-    crc = 0xFFFF
-    
+    crc = 0xFFFF  
     for pos in range(len(buf)):
         crc ^= buf[pos]  # XOR byte into least sig. byte of crc
         
@@ -63,28 +73,31 @@ def crc16(buf):
                 crc >>= 1  # Shift right and XOR 0xA001
                 crc ^= 0xA001
             else:  # Else LSB is not set
-                crc >>= 1  # Just shift right
-    
+                crc >>= 1  # Just shift right 
     return crc
 
+#Convert two bytes to a single 2 byte address
 def formDecAddress(high_byte, low_byte):
     address = (high_byte << 8) | low_byte
 #     hex_address = hex(address)
     return address
 
+#Swap bytes for CRC 
+def reverseCRC(crc):
+    crc_low, crc_high = divmod(crc, 0x100)
+    print("crc ", crc)
+    return ustruct.pack(">BB", crc_high, crc_low)
+
 # Function to handle Modbus requests
-def handle_request(data):
-    
+def handleRequest(data):
     # Extract function code and register/coil address
     slave_address, function_code, start_register_high, start_register_low, register_count_high, register_count_low, recv_crc_1, recv_crc_2= ustruct.unpack(">BBBBBBBB", data)
-#     print("Slave address: ", slave_address)
-#     print("function_code: ", function_code)
-#     print("start_register high: ", start_register_high)
-#     print("start_register low: ", start_register_low)
-#     print("register_count high: ", register_count_high)
-#     print("register_count low: ", register_count_low)
-#     print("crc high", recv_crc_1)
-#     print("crc low", recv_crc_2)
+    print("Slave address: ", slave_address)
+    print("function_code: ", function_code)
+    print("start_register high: ", start_register_high)
+    print("start_register low: ", start_register_low)
+    print("register_count high: ", register_count_high)
+    print("register_count low: ", register_count_low)
     
     # Compute the received and expected CRCs
     recv_crc = (hex(formDecAddress(recv_crc_2, recv_crc_1)))[2:]
@@ -95,8 +108,10 @@ def handle_request(data):
     
     # Compute the start register address
     start_register = formDecAddress(start_register_high, start_register_low)
+    
     # Compute the number of registers
     register_count = formDecAddress(register_count_high, register_count_low)
+    print("Register Count: ", register_count)
     
     # Check matching CRC
     if(recv_crc != expect_crc):
@@ -111,36 +126,36 @@ def handle_request(data):
         if not 0 < register_count <= 3:
             raise ValueError('Invalid number of coils')
             return None
-        response = ustruct.pack(">BB", slave_address, function_code)
+        response = ustruct.pack(">BBB", slave_address, function_code, (register_count * 2))
         for i in range(register_count):
             response += ustruct.pack(">B", coils[start_register + i])
-        
+            
         # Send Modbus RTU response
         return response
 
     # Handle read holding register request
-    elif function_code == READ_HOLDING_REGISTERS:
-        response = ustruct.pack(">BB", slave_address, function_code)
-        if not 0 < register_count <= 3:
-            raise ValueError('Invalid number of holding registers')
-            return None
+    elif function_code == READ_HOLDING_REGISTERS: 
+        if not 0 <= register_count <= 9:
+            raise ValueError('Invalid number of input registers')
+#         response = ustruct.pack(">BBHHB", slave_address, function_code, start_register, register_count, (register_count * 2))
+        response = ustruct.pack(">BBB", slave_address, function_code, (register_count * 2))
         for i in range(register_count):
-            response += ustruct.pack(">B", holding_registers[start_register + i])
-#             print("Value ",i, " : ",holding_registers[start_register + i])
-        
+            response += (ustruct.pack(">H", holding_registers[(start_register + i)]))
+            print("Value ",i, " : ",hex(holding_registers[start_register + i]))
+            
         # Send Modbus RTU response
         return response
     
     # Handle read holding register request
     elif function_code == READ_INPUT_REGISTERS:
-        response = ustruct.pack(">BB", slave_address, function_code)
         if not 0 < register_count <= 9:
             raise ValueError('Invalid number of input registers')
             return None
+#         response = ustruct.pack(">BBHHB", slave_address, function_code, start_register, register_count, (register_count * 2))
+        response = ustruct.pack(">BBB", slave_address, function_code, (register_count * 2))
         for i in range(register_count):
-            response += ustruct.pack(">B", input_registers[start_register + i])
-#             print("Response: ", response)
-#             print("Value ",i, " : ",input_registers[start_register + i])
+            response += (ustruct.pack(">H", input_registers[(start_register + i)]))
+            print("Value ",i, " : ",hex(input_registers[start_register + i]))
         # Send Modbus RTU response
         return response
 
@@ -176,17 +191,28 @@ try:
     while True:
         # Wait for Modbus request
         response_data = 0
-        data = uart.read(50)
-        if data is not None:
-            # Handle request
-#             print(data)
-            response_data = handle_request(data)         
-        if response_data is not None:
-            # Send response
-            response = bytearray(response_data)
-            print("Response = ", response)
-            uart.write(response)
-            time.sleep(1)
+        #Check if there's any data available for reading on UART
+        #If available read it
+        if uart.any():
+            data = uart.read(50)
+            #If anything was read from UART, send it to handleRequest()
+            if data is not None:
+                # Handle request
+                print(data)
+                response_data = handleRequest(data)
+            if response_data is not None:
+                # Send response
+                crc_rev = crc16(response_data)
+                crc = reverseCRC(crc_rev)
+                print("crc: ", crc)
+                response = bytearray(response_data)
+                response.extend(crc)
+
+                print("Response = ", response)
+                uart.write(response)
+                time.sleep(1)
+                gc.collect()
+                
 except KeyboardInterrupt as e:
     print("No more modbus")
 
