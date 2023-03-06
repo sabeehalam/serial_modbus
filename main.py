@@ -7,11 +7,10 @@ import gc
 
 # Define Modbus function codes
 READ_COILS = const(0x01)
-READ_DISCRETE_INPUTS = const(0x02)
 READ_HOLDING_REGISTERS = const(0x03)
 READ_INPUT_REGISTERS = const(0x04)
 WRITE_SINGLE_COIL = const(0x05)
-WRITE_SINGLE_REGISTER = const(0x06)
+WRITE_HOLDING_REGISTER = const(0x06)
 
 # Define slave address
 SLAVE_ADDRESS =const(0x01)
@@ -63,6 +62,7 @@ input_registers = {
     0x09: 456,  # Read-Write Integer
 }
 
+#Create a 16-bit CRC calculator for the modbus command 
 def crc16(buf):
     crc = 0xFFFF  
     for pos in range(len(buf)):
@@ -92,26 +92,27 @@ def reverseCRC(crc):
 def handleRequest(data):
     # Extract function code and register/coil address
     slave_address, function_code, start_register_high, start_register_low, register_count_high, register_count_low, recv_crc_1, recv_crc_2= ustruct.unpack(">BBBBBBBB", data)
-    print("Slave address: ", slave_address)
-    print("function_code: ", function_code)
-    print("start_register high: ", start_register_high)
-    print("start_register low: ", start_register_low)
-    print("register_count high: ", register_count_high)
-    print("register_count low: ", register_count_low)
+#     print("Slave address: ", slave_address)
+#     print("function_code: ", function_code)
+#     print("start_register high: ", start_register_high)
+#     print("start_register low: ", start_register_low)
+#     print("register_count high: ", register_count_high)
+#     print("register_count low: ", register_count_low)
     
     # Compute the received and expected CRCs
     recv_crc = (hex(formDecAddress(recv_crc_2, recv_crc_1)))[2:]
-    print("Received CRC: ", recv_crc)
+#     print("Received CRC: ", recv_crc)
     command = bytearray(data[0:6], "utf-16")
     expect_crc = hex(crc16(command))[2:]
-    print("Expected CRC: ", expect_crc)
+#     print("Expected CRC: ", expect_crc)
     
     # Compute the start register address
     start_register = formDecAddress(start_register_high, start_register_low)
+#     print("Start Register: ", start_register)
     
     # Compute the number of registers
     register_count = formDecAddress(register_count_high, register_count_low)
-    print("Register Count: ", register_count)
+#     print("Register Count: ", register_count)
     
     # Check matching CRC
     if(recv_crc != expect_crc):
@@ -151,11 +152,11 @@ def handleRequest(data):
         if not 0 < register_count <= 9:
             raise ValueError('Invalid number of input registers')
             return None
-#         response = ustruct.pack(">BBHHB", slave_address, function_code, start_register, register_count, (register_count * 2))
         response = ustruct.pack(">BBB", slave_address, function_code, (register_count * 2))
         for i in range(register_count):
             response += (ustruct.pack(">H", input_registers[(start_register + i)]))
             print("Value ",i, " : ",hex(input_registers[start_register + i]))
+        
         # Send Modbus RTU response
         return response
 
@@ -170,13 +171,14 @@ def handleRequest(data):
         return data[0:6]
 
     # Handle write single register request
-    elif function_code == WRITE_SINGLE_REGISTER:
+    elif function_code == WRITE_HOLDING_REGISTER:
         # Extract register value
         if not 0 < start_register <= 9:
             raise ValueError('Invalid number of register')
             return None
         register_value = ustruct.unpack(">H", data[4:6])[0]
-        input_registers[2 * start_register:2 * (start_register + 1)] = ustruct.pack(">H", register_value)
+        print("register_value: ", register_value)
+        holding_registers[start_register] = int.from_bytes(ustruct.pack(">H", register_value), 'big')
         return data[0:6]
 
     # Unsupported function code
@@ -198,7 +200,6 @@ try:
             #If anything was read from UART, send it to handleRequest()
             if data is not None:
                 # Handle request
-                print(data)
                 response_data = handleRequest(data)
             if response_data is not None:
                 # Send response
