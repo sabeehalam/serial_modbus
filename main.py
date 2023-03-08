@@ -12,8 +12,6 @@ READ_INPUT_REGISTERS = const(0x04)
 WRITE_SINGLE_COIL = const(0x05)
 WRITE_HOLDING_REGISTER = const(0x06)
 
-REGISTER_USED = {}
-
 # Define slave address
 SLAVE_ADDRESS =const(0x01)
 
@@ -33,16 +31,20 @@ UART_PARITY = None
 
 # Define Modbus RTU Registers
 coils = {
-    0x00: 1,
-    0x01: 0,
-    0x02: 0,
-    0x03: 1,
-    0x04: 1,
-    0x05: 0,
-    0x06: 0,
-    0x07: 1,
-    0x08: 1,
-}
+    0x00: int('0b1011001', 2),
+    0x01: int('0b1011000', 2),
+    0x02: int('0b1011010', 2),
+    0x03: int('0b1011000', 2),
+    0x04: int('0b1011100', 2)
+    }
+
+discrete_inputs = {
+    0x00: int('0b1111000', 2),
+    0x01: int('0b1011000', 2),
+    0x02: int('0b1011101', 2),
+    0x03: int('0b1011110', 2),
+    0x04: int('0b1011111', 2)
+    }
 
 holding_registers = {
     0x00: 321,
@@ -69,6 +71,14 @@ input_registers = {
     0x08: 123,  # Read-Only Integer
     0x09: 456,  # Read-Write Integer
 }
+
+REG_LENGTHS = { 0x01: len(coils),
+                0x02: len(discrete_inputs),
+                0x03: len(holding_registers),
+                0x04: len(input_registers),
+                0x05: len(coils),
+                0x06: len(holding_registers) 
+                }
 
 def create_exception_resp(request, exc_code):
     # Build Modbus exception response
@@ -102,17 +112,19 @@ def validateResponse(data):
         resp = create_exception_resp(data, CRC_ERROR)
         return resp
        
-    if not (1 < function_code < 7):
-        print("Wrong function code")
+    if not (1 <= function_code < 7):
+        print("Wrong function code: ", function_code)
         resp = create_exception_resp(data, ILLEGAL_FUNCTION)
         return resp
+    
+    register_length = REG_LENGTHS[function_code]
         
-    if not (0 <= start_register <= 3):
+    if not (0 <= start_register <= register_length):
         print("Wrong starting address")
         resp = create_exception_resp(data, ILLEGAL_ADDRESS)
         return resp
     
-    if not (0 <= register_count <= 9):
+    if not (0 <= register_count <= register_length - start_register):
         print("Wrong register count")
         resp = create_exception_resp(data, ILLEGAL_ADDRESS)
         return resp
@@ -142,7 +154,7 @@ def formDecAddress(high_byte, low_byte):
 #Swap bytes for CRC 
 def reverseCRC(crc):
     crc_low, crc_high = divmod(crc, 0x100)
-    print("crc ", crc)
+    print("crc ordered", crc)
     return ustruct.pack(">BB", crc_high, crc_low)
 
 # Function to handle Modbus requests
@@ -158,32 +170,22 @@ def handleRequest(data):
     
     # Handle read coil request
     if function_code == READ_COILS:
-        if not 0 < register_count <= 7:
-            raise ValueError('Invalid number of coils')
-            return None
         response = ustruct.pack(">BBB", slave_address, function_code, (register_count * 2))
         for i in range(register_count):
-            response += ustruct.pack(">B", coils[start_register + i])
-            
+            response += ustruct.pack(">H", coils[start_register + i])        
         # Send Modbus RTU response
         return response
 
     # Handle read holding register request
     elif function_code == READ_HOLDING_REGISTERS: 
-        if not 0 <= register_count <= 9:
-            raise ValueError('Invalid number of input registers')
         response = ustruct.pack(">BBB", slave_address, function_code, (register_count * 2))
         for i in range(register_count):
-            response += (ustruct.pack(">H", holding_registers[(start_register + i)]))
-            
+            response += (ustruct.pack(">H", holding_registers[(start_register + i)]))      
         # Send Modbus RTU response
         return response
     
     # Handle read holding register request
     elif function_code == READ_INPUT_REGISTERS:
-        if not 0 < register_count <= 9:
-            raise ValueError('Invalid number of input registers')
-            return None
         response = ustruct.pack(">BBB", slave_address, function_code, (register_count * 2))
         for i in range(register_count):
             response += (ustruct.pack(">H", input_registers[(start_register + i)]))
@@ -193,9 +195,6 @@ def handleRequest(data):
 
     # Handle write single coil request
     elif function_code == WRITE_SINGLE_COIL:
-        if not 0 < start_register <= 3:
-            raise ValueError('Invalid number of coils')
-            return None
         # Extract coil value
         coil_value = data[5] != 0x00
         coils[start_register] = coil_value
@@ -204,9 +203,6 @@ def handleRequest(data):
     # Handle write single register request
     elif function_code == WRITE_HOLDING_REGISTER:
         # Extract register value
-        if not 0 < start_register <= 9:
-            raise ValueError('Invalid number of register')
-            return None
         register_value = ustruct.unpack(">H", data[4:6])[0]
         holding_registers[start_register] = int.from_bytes(ustruct.pack(">H", register_value), 'big')
         return data[0:6]
@@ -239,7 +235,6 @@ try:
                 response_data = handleRequest(data)
                 crc_rev = crc16(response_data)
                 crc = reverseCRC(crc_rev)
-                print("crc: ", crc)
                 response = bytearray(response_data)
                 response.extend(crc)
                 print("Response = ", response)
