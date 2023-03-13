@@ -116,14 +116,12 @@ def reverseCRC(crc):
 
 #check whether a bit is set or not
 def isSet(x, n):
-    return x & 2 ** n != 0 
-    # a more bitwise- and performance-friendly version:
     return x & 1 << n != 0
 
 #Validate the command from master
 def validateResponse(data):
     #Print received command
-    print("Command: ", data[0:7]) 
+    print("Command: ", data[0:9]) 
     
 # #     print and check
 #     print("Slave Address: ", slave_address)
@@ -171,7 +169,10 @@ def validateResponse(data):
     
     # Check function code and validate accordingly
     if(data[1] == 0x01 or data[1] == 0x02):
-        
+        if not (0 <= formDecAddress(data[4], data[5]) <= 7):
+            print("Wrong bit count")
+            resp = create_exception_resp(data, ILLEGAL_DATA)
+            return resp
         return None
 
     # Check function code and validate accordingly
@@ -218,7 +219,17 @@ def handleRequest(data):
         start_register_high, start_register_low, value_high, value_low, recv_crc_1, recv_crc_2 = ustruct.unpack(">BBBBBB", data[2:8])
         start_register = formDecAddress(start_register_high, start_register_low) # Compute the start register address
         values = formDecAddress(value_high, value_low)
-        
+    
+#     print("Slave Address: ", slave_address)
+#     print("function_code: ", function_code)
+#     print("start_register_high: ", start_coil)
+#     print("start_register_low: ", start_register_low)
+#     print("value or count high: ", coil_count)
+#     print("value or count low: ", register_count_low)
+#     print("recv_crc_1: ", recv_crc_1)
+#     print("recv_crc_2: ", recv_crc_2)
+    
+    
     # Handle read coil request
     if function_code == READ_COILS:
         response = ustruct.pack(">BBB", slave_address, function_code, coil_count) #Coil count is either 1 or 2 for our case
