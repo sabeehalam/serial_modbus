@@ -29,25 +29,8 @@ UART_DATA_BITS = 8
 UART_STOP_BITS = 1
 UART_PARITY = None
 
-# Define Modbus RTU Registers
-# coils = {
-#     0x00: (0b00110010), #Coils 0-7
-#     0x01: (0b10110000), #Coils 8-15
-#     0x02: (0b10111011), #Coils 16-23
-#     0x03: (0b10111100), #Coils 24-31
-#     0x04: (0b10111111)  #Coils 32-39
-#     }
-
-# discrete_inputs = {
-#     0x00: (0b11110001), #Coils 0-7
-#     0x01: (0b10110000), #Coils 8-15
-#     0x02: (0b10111011), #Coils 16-23
-#     0x03: (0b10111100), #Coils 24-31
-#     0x04: (0b10111111)  #Coils 32-39
-#     }
-
-coil_single = 0b00000011
-discrete_input_single = 0b00000011
+coil_single = 0b01010110
+discrete_input_single = 0b10110011
 
 holding_registers = {
     0x00: 321,
@@ -76,11 +59,11 @@ input_registers = {
     }
 
 REG_LENGTHS = {
-    0x01: 8,
-    0x02: 8,
+    0x01: 7,
+    0x02: 7,
     0x03: len(holding_registers),
     0x04: len(input_registers),
-    0x05: 8,
+    0x05: 7,
     0x06: len(holding_registers) 
     }
 
@@ -242,7 +225,7 @@ def handleRequest(data):
         return response
     
     # Handle read discrete inputs request
-    if function_code == READ_DISCRETE_INPUTS:
+    elif function_code == READ_DISCRETE_INPUTS:
         response = ustruct.pack(">BBB", slave_address, function_code, coil_count) #Coil count is either 1 or 2 for our case
         discrete_input_values = 0b00
         for bit_index in range(coil_count):
@@ -291,12 +274,21 @@ def handleRequest(data):
         response = ustruct.pack(">BBBB", slave_address, function_code, start_register, values)
         # Send Modbus RTU response
         return data[0:6]
-
+    
     # Unsupported function code
     else:
         return None
+
+#Read two coil bits and change pin outputs accordingly
+def coilPinOutChange(coil_1, coil_2, coil_single):
+    coil_1.value(coil_single and 0x01)
+    coil_2.value(coil_single and 0x02)     
        
 try:
+    #Initialize output coils
+    coil_1 = Pin(Pin.PB_08, Pin.OUT, Pin.PULL_DOWN)
+    coil_2 = Pin(Pin.PB_07, Pin.OUT, Pin.PULL_DOWN)
+    
     # Initialize UART
     uart = UART(1, baudrate=UART_BAUD_RATE)
     uart.init(baudrate=UART_BAUD_RATE, bits=UART_DATA_BITS,
@@ -309,18 +301,21 @@ try:
         #If available read it
         if uart.any():
             data = uart.read(40)
+            
             #If anything was read from UART, validate and parse it from validateResponse() and send it to handleRequest()
             if data is not None:
                 # Handle request
-                response = validateResponse(data)
+                response_error = validateResponse(data)
                 # Extract response for command from registers in read case and edit registers in write case
-                if response is None:
+                if response_error is None:
                     response_data = handleRequest(data)
                     crc = reverseCRC(crc16(response_data))
                     response = bytearray(response_data)
                     response.extend(crc)
                     print("Response = ", response)
                     uart.write(response)
+                    #Change coil state on register update
+                    coilPinOutChange(coil_1, coil_2, state_1, state_2)
                     gc.collect()
                 
                 else:
