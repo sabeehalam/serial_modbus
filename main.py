@@ -29,8 +29,8 @@ UART_DATA_BITS = 8
 UART_STOP_BITS = 1
 UART_PARITY = None
 
-coil_single = 0b01010110
-discrete_input_single = 0b10110011
+coil_single = 0b00000010
+discrete_input_single = 0b00000011
 
 holding_registers = {
     0x00: 321,
@@ -59,11 +59,11 @@ input_registers = {
     }
 
 REG_LENGTHS = {
-    0x01: 7,
-    0x02: 7,
+    0x01: 8,
+    0x02: 8,
     0x03: len(holding_registers),
     0x04: len(input_registers),
-    0x05: 7,
+    0x05: 8,
     0x06: len(holding_registers) 
     }
 
@@ -211,8 +211,7 @@ def handleRequest(data):
 #     print("value or count low: ", register_count_low)
 #     print("recv_crc_1: ", recv_crc_1)
 #     print("recv_crc_2: ", recv_crc_2)
-    
-    
+      
     # Handle read coil request
     if function_code == READ_COILS:
         response = ustruct.pack(">BBB", slave_address, function_code, coil_count) #Coil count is either 1 or 2 for our case
