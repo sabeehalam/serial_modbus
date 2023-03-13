@@ -30,24 +30,24 @@ UART_STOP_BITS = 1
 UART_PARITY = None
 
 # Define Modbus RTU Registers
-coils = {
-    0x00: (0b00110010), #Coils 0-7
-    0x01: (0b10110000), #Coils 8-15
-    0x02: (0b10111011), #Coils 16-23
-    0x03: (0b10111100), #Coils 24-31
-    0x04: (0b10111111)  #Coils 32-39
-    }
-
-coil_single = 0b00000011
-discrete_inputs_single = 0b00000011
-
-discrete_inputs = {
-    0x00: (0b11110001), #Coils 0-7
+# coils = {
+#     0x00: (0b00110010), #Coils 0-7
 #     0x01: (0b10110000), #Coils 8-15
 #     0x02: (0b10111011), #Coils 16-23
 #     0x03: (0b10111100), #Coils 24-31
 #     0x04: (0b10111111)  #Coils 32-39
-    }
+#     }
+
+# discrete_inputs = {
+#     0x00: (0b11110001), #Coils 0-7
+#     0x01: (0b10110000), #Coils 8-15
+#     0x02: (0b10111011), #Coils 16-23
+#     0x03: (0b10111100), #Coils 24-31
+#     0x04: (0b10111111)  #Coils 32-39
+#     }
+
+coil_single = 0b00000011
+discrete_input_single = 0b00000011
 
 holding_registers = {
     0x00: 321,
@@ -76,11 +76,11 @@ input_registers = {
     }
 
 REG_LENGTHS = {
-    0x01: len(coils),
-    0x02: len(discrete_inputs),
+    0x01: 8,
+    0x02: 8,
     0x03: len(holding_registers),
     0x04: len(input_registers),
-    0x05: len(coils),
+    0x05: 8,
     0x06: len(holding_registers) 
     }
 
@@ -162,8 +162,8 @@ def validateResponse(data):
         resp = create_exception_resp(data, ILLEGAL_FUNCTION)
         return resp
     
-    register_length = REG_LENGTHS[data[1]]
-        
+    #Check register length to avoid wrong addressing
+    register_length = REG_LENGTHS[data[1]]    
     if not (0 <= start_register <= register_length):
         print("Wrong starting address")
         resp = create_exception_resp(data, ILLEGAL_ADDRESS)
@@ -171,6 +171,7 @@ def validateResponse(data):
     
     # Check function code and validate accordingly
     if(data[1] == 0x01 or data[1] == 0x02):
+        
         return None
 
     # Check function code and validate accordingly
@@ -178,7 +179,7 @@ def validateResponse(data):
         register_count = formDecAddress(data[4], data[5])
         if not (0 <= register_count and (register_count + start_register) <= register_length):
             print("Wrong register count")
-            resp = create_exception_resp(data, ILLEGAL_ADDRESS)
+            resp = create_exception_resp(data, ILLEGAL_DATA)
             return resp
         return None
     
@@ -258,16 +259,19 @@ def handleRequest(data):
 
     # Handle write single coil request
     elif function_code == WRITE_SINGLE_COIL:
-        mask = 1 << start_register
+        mask_1 = 0b00000001 << start_register
         # Extract coil value
-        print("Coil value: ", values)
-        if values:
-            coil_single | values
+#         print("Coil value: ", values)
+        print("Coil value: ", coil_single)
+        print("Coil mask: ", mask_1)
+        if values != 0:
+            coil_single |= mask_1
         else:
-            coil_single & values
-        response = ustruct.pack(">BBBB", slave_address, function_code, start_register, values)
+            mask_1 = ~mask_1
+            coil_single &= mask_1
+        print("Coil value after: ", coil_single)
         # Send Modbus RTU response
-        return response
+        return data[0:6]
 
     # Handle write single register request
     elif function_code == WRITE_HOLDING_REGISTER:
@@ -275,7 +279,7 @@ def handleRequest(data):
         holding_registers[start_register] = int.from_bytes(ustruct.pack(">H", values), 'big')
         response = ustruct.pack(">BBBB", slave_address, function_code, start_register, values)
         # Send Modbus RTU response
-        return response
+        return data[0:6]
 
     # Unsupported function code
     else:
